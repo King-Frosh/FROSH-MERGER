@@ -48,7 +48,7 @@ export function isSpreadsheet(name: string): boolean {
 export async function parseSpreadsheet(file: File): Promise<ParsedFile> {
   const XLSX = await getXLSX();
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: false });
+  const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: false, dense: true });
   const sheets: SheetData[] = wb.SheetNames.map((sn: string) => {
     const ws = wb.Sheets[sn];
     const rows = XLSX.utils.sheet_to_json(ws, {
@@ -81,10 +81,7 @@ function normalizeHeaders(row: unknown[]): { display: string; key: string }[] {
   });
 }
 
-/**
- * Convert the messaging report timestamp columns to the export format:
- * YYYY-MM-DD HH:mm:ss
- */
+/** Convert report timestamps to YYYY-MM-DD HH:mm:ss. */
 function formatReportDateTime(value: unknown): unknown {
   if (value == null || value === "") return value;
 
@@ -93,12 +90,9 @@ function formatReportDateTime(value: unknown): unknown {
   if (value instanceof Date) {
     date = value;
   } else if (typeof value === "number" && Number.isFinite(value)) {
-    // Excel serial date/time. Excel's epoch is 1899-12-30 for SheetJS-style values.
     date = new Date(Date.UTC(1899, 11, 30) + Math.round(value * 86400000));
   } else if (typeof value === "string") {
     const text = value.trim();
-
-    // Already in the requested format (or ISO with a time component).
     const direct = text.match(
       /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/,
     );
@@ -107,7 +101,6 @@ function formatReportDateTime(value: unknown): unknown {
       return `${y.padStart(4, "0")}-${mo.padStart(2, "0")}-${d.padStart(2, "0")} ${h.padStart(2, "0")}:${mi.padStart(2, "0")}:${sec.padStart(2, "0")}`;
     }
 
-    // Common report format: DD/MM/YYYY HH:mm:ss.
     const dmy = text.match(
       /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
     );
@@ -135,28 +128,28 @@ function formatMessagingTimeColumns(rows: unknown[][]): unknown[][] {
   if (!rows.length || !rows[0]) return rows;
 
   const targetColumns = new Set(["msg time", "submit time", "response time", "deliver time"]);
-  const columns = rows[0].map((header, index) => {
-    const name = String(header ?? "").trim().toLowerCase();
-    return targetColumns.has(name) ? index : -1;
-  }).filter((index) => index >= 0);
+  const columns = rows[0]
+    .map((header, index) => {
+      const name = String(header ?? "").trim().toLowerCase();
+      return targetColumns.has(name) ? index : -1;
+    })
+    .filter((index) => index >= 0);
 
   if (!columns.length) return rows;
 
   return rows.map((row, rowIndex) => {
     if (rowIndex === 0) return row;
     const formatted = [...row];
-    for (const column of columns) {
-      formatted[column] = formatReportDateTime(formatted[column]);
-    }
+    for (const column of columns) formatted[column] = formatReportDateTime(formatted[column]);
     return formatted;
   });
 }
 
 /**
- * Merge rows for the "vertical" mode (header alignment across files).
- * Pure & synchronous — operates on already-parsed cell data, so no CDN needed.
+ * Merge rows for vertical mode. maxRows is used by the UI preview so it does
+ * not build another full merged copy of a large dataset just to show 7 rows.
  */
-export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][] {
+export function mergeToAoa(entries: FileEntry[], opts: MergeOptions, maxRows?: number): unknown[][] {
   const valid = entries.filter((e) => e.parsed.sheets.length > 0);
   const chosen = valid.map((e) => ({
     file: e,
@@ -164,12 +157,16 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
   }));
   const out: unknown[][] = [];
   const includeFileCol = opts.includeFileCol;
+  const reachedLimit = () => maxRows != null && out.length >= maxRows;
 
   if (!opts.hasHeader) {
     for (const c of chosen) {
       if (!c.sheet) continue;
-      if (includeFileCol) c.sheet.rows.forEach((r) => out.push([c.file.parsed.fileName, ...r]));
-      else out.push(...c.sheet.rows);
+      for (const sourceRow of c.sheet.rows) {
+        if (includeFileCol) out.push([c.file.parsed.fileName, ...sourceRow]);
+        else out.push(sourceRow);
+        if (reachedLimit()) return formatMessagingTimeColumns(out.slice(0, maxRows));
+      }
     }
     return formatMessagingTimeColumns(out);
   }
@@ -192,8 +189,6 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
       return { c, keys, display };
     });
 
-  // Keep the exact visible header text from the first input file.
-  // Internal normalized keys are used only for matching columns between files.
   const firstHeader = first.sheet.rows[0] ?? [];
   const firstKeys = normalizeHeaders(firstHeader);
   const firstDisplayByKey = new Map(firstKeys.map((k) => [k.key, k.display]));
@@ -201,6 +196,7 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
     k === "__source__" ? "Source File" : (firstDisplayByKey.get(k) ?? perFile[0].display.get(k) ?? k)
   );
   out.push(headerOut);
+  if (reachedLimit()) return out.slice(0, maxRows);
 
   for (const pf of perFile) {
     const colOf = new Map<string, number>();
@@ -218,9 +214,22 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
         if (ci !== undefined && src && ci < src.length) row[idx] = src[ci];
       });
       out.push(row);
+      if (reachedLimit()) return formatMessagingTimeColumns(out.slice(0, maxRows));
     }
   }
   return formatMessagingTimeColumns(out);
+}
+
+export function mergedRowCount(entries: FileEntry[], opts: MergeOptions): number {
+  const chosen = entries
+    .filter((e) => e.parsed.sheets.length > 0)
+    .map((e) => e.parsed.sheets[e.sheetIndex] ?? e.parsed.sheets[0]);
+  if (opts.mode !== "vertical") return chosen.reduce((sum, sheet) => sum + (sheet?.rows.length ?? 0), 0);
+  const dataRows = chosen.reduce(
+    (sum, sheet) => sum + Math.max(0, (sheet?.rows.length ?? 0) - (opts.hasHeader ? 1 : 0)),
+    0,
+  );
+  return dataRows + (opts.hasHeader && dataRows > 0 ? 1 : 0);
 }
 
 export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promise<MergeOutput> {
@@ -265,7 +274,13 @@ export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promis
     }
   }
 
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  // XLSX ZIPs are uncompressed by default. Compression substantially reduces
+  // large export sizes and also lowers the amount of data written to disk.
+  const out = XLSX.write(wb, {
+    bookType: "xlsx",
+    type: "array",
+    compression: true,
+  });
   const blob = new Blob([out], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
@@ -283,8 +298,6 @@ export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promis
 function applyColWidths(ws: any, rows: unknown[][]) {
   if (!rows[0]) return;
   ws["!cols"] = rows[0].map((header, i) => {
-    // Start from the header width so titles such as "Submit Time",
-    // "Response Time" and "Final Text" are fully visible in Excel.
     let w = Math.max(12, String(header ?? "").trim().length + 2);
     const limit = Math.min(rows.length, 250);
     for (let r = 0; r < limit; r++) {
