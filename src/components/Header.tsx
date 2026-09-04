@@ -43,7 +43,7 @@ export default function Header({
             </svg>
           </span>
           <span className="hidden font-display text-lg font-bold tracking-tight text-slate-900 dark:text-white sm:block">
-            Merge<span className="text-brand-600 dark:text-brand-400">Press</span>
+            BRICCS<span className="text-brand-600 dark:text-brand-400">Merge</span>
           </span>
         </button>
 
