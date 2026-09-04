@@ -112,7 +112,7 @@ export default function Home({ onNavigate }: { onNavigate: (t: Tab) => void }) {
       {/* Features */}
       <section className="py-10">
         <h2 className="text-center font-display text-2xl font-bold text-slate-900 dark:text-white sm:text-3xl">
-          Why MergePress?
+          Why BRICCSMerge?
         </h2>
         <div className="mx-auto mt-10 grid max-w-4xl gap-6 sm:grid-cols-2">
           <Feature
