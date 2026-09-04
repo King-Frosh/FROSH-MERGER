@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dce7fd;
+  --color-brand-200: #c0d4fc;
+  --color-brand-300: #94b7fa;
+  --color-brand-400: #6192f5;
+  --color-brand-500: #3b6cf0;
+  --color-brand-600: #254fe4;
+  --color-brand-700: #1d3cd1;
+  --color-brand-800: #1e33a9;
+  --color-brand-900: #1d3085;
+  --color-brand-950: #162051;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Slim, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 0.45);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Soft entrance */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.5s ease both;
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease both;
+}
+
+.bg-grid {
+  background-image: linear-gradient(to right, rgb(100 116 139 / 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(100 116 139 / 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
