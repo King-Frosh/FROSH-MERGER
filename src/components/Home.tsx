@@ -38,7 +38,7 @@ export default function Home({ onNavigate }: { onNavigate: (t: Tab) => void }) {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-lg text-slate-500 dark:text-slate-400">
-            MergePress is a fast, professional toolkit to combine Excel files and shrink
+            BRICCSMerge is a fast, professional toolkit to combine Excel files and shrink
             documents &amp; images into a single ZIP — no uploads, no sign-ups, no limits.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
