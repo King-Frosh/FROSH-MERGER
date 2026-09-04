@@ -121,8 +121,13 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
       return { c, keys, display };
     });
 
+  // Keep the exact visible header text from the first input file.
+  // Internal normalized keys are used only for matching columns between files.
+  const firstHeader = first.sheet.rows[0] ?? [];
+  const firstKeys = normalizeHeaders(firstHeader);
+  const firstDisplayByKey = new Map(firstKeys.map((k) => [k.key, k.display]));
   const headerOut: unknown[] = orderedKeys.map((k) =>
-    k === "__source__" ? "Source File" : (perFile[0].display.get(k) ?? k)
+    k === "__source__" ? "Source File" : (firstDisplayByKey.get(k) ?? perFile[0].display.get(k) ?? k)
   );
   out.push(headerOut);
 
@@ -205,8 +210,10 @@ export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promis
 
 function applyColWidths(ws: any, rows: unknown[][]) {
   if (!rows[0]) return;
-  ws["!cols"] = rows[0].map((_, i) => {
-    let w = 8;
+  ws["!cols"] = rows[0].map((header, i) => {
+    // Start from the header width so titles such as "Submit Time",
+    // "Response Time" and "Final Text" are fully visible in Excel.
+    let w = Math.max(12, String(header ?? "").trim().length + 2);
     const limit = Math.min(rows.length, 250);
     for (let r = 0; r < limit; r++) {
       const v = rows[r]?.[i];
