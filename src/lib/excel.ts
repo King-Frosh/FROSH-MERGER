@@ -82,6 +82,77 @@ function normalizeHeaders(row: unknown[]): { display: string; key: string }[] {
 }
 
 /**
+ * Convert the messaging report timestamp columns to the export format:
+ * YYYY-MM-DD HH:mm:ss
+ */
+function formatReportDateTime(value: unknown): unknown {
+  if (value == null || value === "") return value;
+
+  let date: Date | null = null;
+
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    // Excel serial date/time. Excel's epoch is 1899-12-30 for SheetJS-style values.
+    date = new Date(Date.UTC(1899, 11, 30) + Math.round(value * 86400000));
+  } else if (typeof value === "string") {
+    const text = value.trim();
+
+    // Already in the requested format (or ISO with a time component).
+    const direct = text.match(
+      /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/,
+    );
+    if (direct) {
+      const [, y, mo, d, h, mi, sec = "00"] = direct;
+      return `${y.padStart(4, "0")}-${mo.padStart(2, "0")}-${d.padStart(2, "0")} ${h.padStart(2, "0")}:${mi.padStart(2, "0")}:${sec.padStart(2, "0")}`;
+    }
+
+    // Common report format: DD/MM/YYYY HH:mm:ss.
+    const dmy = text.match(
+      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+    );
+    if (dmy) {
+      const [, d, mo, y, h = "00", mi = "00", sec = "00"] = dmy;
+      return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")} ${h.padStart(2, "0")}:${mi.padStart(2, "0")}:${sec.padStart(2, "0")}`;
+    }
+
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) date = parsed;
+  }
+
+  if (!date || Number.isNaN(date.getTime())) return value;
+
+  const y = date.getUTCFullYear();
+  const mo = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  const h = String(date.getUTCHours()).padStart(2, "0");
+  const mi = String(date.getUTCMinutes()).padStart(2, "0");
+  const sec = String(date.getUTCSeconds()).padStart(2, "0");
+  return `${y}-${mo}-${d} ${h}:${mi}:${sec}`;
+}
+
+function formatMessagingTimeColumns(rows: unknown[][]): unknown[][] {
+  if (!rows.length || !rows[0]) return rows;
+
+  const targetColumns = new Set(["msg time", "submit time", "response time", "deliver time"]);
+  const columns = rows[0].map((header, index) => {
+    const name = String(header ?? "").trim().toLowerCase();
+    return targetColumns.has(name) ? index : -1;
+  }).filter((index) => index >= 0);
+
+  if (!columns.length) return rows;
+
+  return rows.map((row, rowIndex) => {
+    if (rowIndex === 0) return row;
+    const formatted = [...row];
+    for (const column of columns) {
+      formatted[column] = formatReportDateTime(formatted[column]);
+    }
+    return formatted;
+  });
+}
+
+/**
  * Merge rows for the "vertical" mode (header alignment across files).
  * Pure & synchronous — operates on already-parsed cell data, so no CDN needed.
  */
@@ -100,7 +171,7 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
       if (includeFileCol) c.sheet.rows.forEach((r) => out.push([c.file.parsed.fileName, ...r]));
       else out.push(...c.sheet.rows);
     }
-    return out;
+    return formatMessagingTimeColumns(out);
   }
 
   const first = chosen.find((c) => c.sheet && c.sheet.rows.length > 0);
@@ -149,7 +220,7 @@ export function mergeToAoa(entries: FileEntry[], opts: MergeOptions): unknown[][
       out.push(row);
     }
   }
-  return out;
+  return formatMessagingTimeColumns(out);
 }
 
 export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promise<MergeOutput> {
@@ -168,8 +239,9 @@ export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promis
     const used = new Set<string>();
     for (const c of chosen) {
       if (!c.sheet) continue;
-      const ws = XLSX.utils.aoa_to_sheet(c.sheet.rows);
-      applyColWidths(ws, c.sheet.rows);
+      const formattedRows = formatMessagingTimeColumns(c.sheet.rows);
+      const ws = XLSX.utils.aoa_to_sheet(formattedRows);
+      applyColWidths(ws, formattedRows);
       const base = c.file.parsed.fileName.replace(/\.[^.]+$/, "").slice(0, 28) || "Sheet";
       let name = base;
       let i = 2;
@@ -179,8 +251,8 @@ export async function runMerge(entries: FileEntry[], opts: MergeOptions): Promis
       }
       used.add(name.toLowerCase());
       XLSX.utils.book_append_sheet(wb, ws, name);
-      outputSheets.push({ name, rows: c.sheet.rows.length });
-      outputRows += c.sheet.rows.length;
+      outputSheets.push({ name, rows: formattedRows.length });
+      outputRows += formattedRows.length;
     }
   } else {
     const rows = mergeToAoa(entries, opts);
